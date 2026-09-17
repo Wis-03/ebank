@@ -13,4 +13,5 @@ public class BankAccount {
     private double balance;
     private Date createdAt;
     private String type;
+    private String customerId;
 }

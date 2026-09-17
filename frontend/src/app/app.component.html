@@ -1,0 +1,141 @@
+<div class="flex h-dvh flex-col bg-slate-100">
+  <!-- Header -->
+  <header class="bg-navy text-white shadow-md">
+    <div class="mx-auto flex max-w-4xl items-center justify-between gap-4 px-4 py-3">
+      <div class="flex items-center gap-3">
+        <div class="flex h-10 w-10 items-center justify-center rounded-full bg-light-cyan text-sm font-bold text-navy">EB</div>
+        <div>
+          <h1 class="text-lg font-semibold leading-tight">EBank AI Assistant</h1>
+          <p class="text-xs text-light-cyan">AI Assistant · texte, image, PDF, audio</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 text-sm">
+        <span class="h-2.5 w-2.5 rounded-full" [class.bg-emerald-400]="online()" [class.bg-red-400]="!online()"></span>
+        <span>{{ online() ? 'Online' : 'Hors ligne' }}</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- Messages -->
+  <main #scrollArea class="flex-1 overflow-y-auto">
+    <div class="mx-auto flex max-w-4xl flex-col gap-4 px-4 py-6">
+      @for (message of messages(); track $index) {
+        <div class="flex" [class.justify-end]="message.role === 'user'">
+          <div class="flex max-w-[85%] flex-col sm:max-w-[75%]" [class.items-end]="message.role === 'user'">
+            @if (message.attachment; as att) {
+              <div class="mb-1 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" data-testid="attachment">
+                @switch (att.kind) {
+                  @case ('image') {
+                    <img [src]="att.url" [alt]="att.file.name" class="max-h-64 w-auto object-contain" />
+                  }
+                  @case ('audio') {
+                    <audio [src]="att.url" controls class="w-64 max-w-full p-2"></audio>
+                  }
+                  @case ('pdf') {
+                    <a [href]="att.url" target="_blank" rel="noopener" class="flex items-center gap-3 px-4 py-3 text-sm text-navy hover:bg-slate-50">
+                      <span class="rounded bg-red-100 px-2 py-1 text-xs font-bold text-red-700">PDF</span>
+                      <span class="break-all">{{ att.file.name }}</span>
+                    </a>
+                  }
+                }
+              </div>
+            }
+            @if (message.transcription) {
+              <p class="mb-1 max-w-full rounded-xl bg-light-cyan/60 px-3 py-2 text-xs italic text-navy" data-testid="transcription">
+                Transcription : « {{ message.transcription }} »
+              </p>
+            }
+            <div
+              class="rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-line break-words shadow-sm"
+              [class.bg-bank-blue]="message.role === 'user'"
+              [class.text-white]="message.role === 'user'"
+              [class.rounded-br-sm]="message.role === 'user'"
+              [class.bg-white]="message.role === 'assistant' && !message.error"
+              [class.text-slate-800]="message.role === 'assistant' && !message.error"
+              [class.rounded-bl-sm]="message.role === 'assistant'"
+              [class.bg-red-50]="message.error"
+              [class.text-red-700]="message.error"
+              [class.border]="message.error"
+              [class.border-red-200]="message.error">{{ message.content }}</div>
+            <p class="mt-1 px-1 text-xs text-slate-400">
+              {{ message.role === 'user' ? 'Vous' : 'Assistant' }} · {{ message.time | date: 'HH:mm' }}
+            </p>
+          </div>
+        </div>
+      }
+
+      @if (loading()) {
+        <div class="flex">
+          <div class="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-white px-4 py-3 text-sm text-slate-500 shadow-sm">
+            <span class="h-2 w-2 animate-bounce rounded-full bg-bank-blue"></span>
+            <span class="h-2 w-2 animate-bounce rounded-full bg-bank-blue [animation-delay:150ms]"></span>
+            <span class="h-2 w-2 animate-bounce rounded-full bg-bank-blue [animation-delay:300ms]"></span>
+            <span class="ml-1">Assistant réfléchit...</span>
+          </div>
+        </div>
+      }
+    </div>
+  </main>
+
+  <!-- Saisie -->
+  <footer class="border-t border-slate-200 bg-white">
+    <div class="mx-auto max-w-4xl px-4 pt-3">
+      @if (attachment(); as att) {
+        <div class="mb-2 flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm" data-testid="pending-attachment">
+          @if (att.kind === 'image') {
+            <img [src]="att.url" alt="" class="h-10 w-10 rounded object-cover" />
+          } @else {
+            <span class="rounded px-2 py-1 text-xs font-bold"
+                  [class.bg-red-100]="att.kind === 'pdf'" [class.text-red-700]="att.kind === 'pdf'"
+                  [class.bg-light-cyan]="att.kind === 'audio'" [class.text-navy]="att.kind === 'audio'">
+              {{ att.kind === 'pdf' ? 'PDF' : 'AUDIO' }}
+            </span>
+          }
+          <span class="min-w-0 flex-1 truncate text-slate-700">{{ att.file.name }}</span>
+          <button type="button" (click)="removeAttachment()" class="text-slate-400 hover:text-red-600" aria-label="Retirer la pièce jointe">✕</button>
+        </div>
+        @if (att.kind === 'audio') {
+          <p class="mb-2 text-xs text-slate-500">L'audio est transcrit puis traité comme votre question.</p>
+        }
+      }
+      @if (notice()) {
+        <p class="mb-2 text-xs text-red-600">{{ notice() }}</p>
+      }
+    </div>
+    <form class="mx-auto flex max-w-4xl items-center gap-2 px-4 pb-3" (ngSubmit)="send()">
+      <input #fileInput type="file" class="hidden" accept="image/*,application/pdf,audio/*" (change)="onFileSelected($event)" />
+      <button type="button" (click)="openFilePicker()" [disabled]="loading() || recording()"
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-slate-300 text-slate-600 transition hover:border-bank-blue hover:text-bank-blue disabled:opacity-40"
+              aria-label="Joindre une image, un PDF ou un audio" title="Joindre une image, un PDF ou un audio">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="m18.4 11.1-6.9 6.9a4.5 4.5 0 0 1-6.4-6.4l7.4-7.4a3 3 0 0 1 4.2 4.2l-7.4 7.4a1.5 1.5 0 0 1-2.1-2.1l6.9-6.9" />
+        </svg>
+      </button>
+      <button type="button" (click)="toggleRecording()" [disabled]="loading()"
+              class="flex h-10 w-10 shrink-0 items-center justify-center rounded-full border transition disabled:opacity-40"
+              [class.border-red-500]="recording()" [class.bg-red-500]="recording()" [class.text-white]="recording()" [class.animate-pulse]="recording()"
+              [class.border-slate-300]="!recording()" [class.text-slate-600]="!recording()"
+              [attr.aria-label]="recording() ? 'Arrêter l\'enregistrement' : 'Enregistrer un message vocal'"
+              [title]="recording() ? 'Arrêter l\'enregistrement' : 'Enregistrer un message vocal'">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="h-5 w-5">
+          <rect x="9" y="3" width="6" height="11" rx="3" />
+          <path stroke-linecap="round" d="M5 11a7 7 0 0 0 14 0M12 18v3" />
+        </svg>
+      </button>
+      <input
+        type="text"
+        name="draft"
+        [(ngModel)]="draft"
+        [placeholder]="recording() ? 'Enregistrement en cours...' : attachment()?.kind === 'audio' ? 'Question tirée de l\'audio' : 'Écrivez votre message...'"
+        [disabled]="attachment()?.kind === 'audio'"
+        autocomplete="off"
+        class="min-w-0 flex-1 rounded-full border border-slate-300 px-4 py-2.5 text-sm outline-none focus:border-bank-blue focus:ring-2 focus:ring-light-cyan disabled:bg-slate-100" />
+      <button
+        type="submit"
+        [disabled]="!canSend()"
+        class="shrink-0 rounded-full bg-navy px-5 py-2.5 text-sm font-medium text-white transition hover:bg-bank-blue disabled:cursor-not-allowed disabled:opacity-40">
+        Envoyer
+      </button>
+    </form>
+  </footer>
+</div>

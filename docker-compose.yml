@@ -1,0 +1,203 @@
+# Application Ebank complete : docker compose up --build
+#
+# Secrets (jamais ecrits ici ni dans les images) : lus depuis l'environnement du shell ou depuis
+# un fichier .env non versionne (voir .env.example) : OPENAI_API_KEY, PGVECTOR_PASSWORD, TELEGRAM_BOT_TOKEN.
+#
+# Communications internes : noms de services Docker sur le reseau ebank-network, jamais localhost.
+# Les fichiers du Config Server gardent les valeurs "localhost" du lancement local : dans Docker,
+# les variables d'environnement ci-dessous les remplacent (elles priment sur le Config Server).
+#
+# Demarrage ordonne par healthchecks : Discovery -> Config -> Customer / Ebank / MCP -> Gateway / Chatbot -> Frontend.
+
+x-healthcheck-timing: &healthcheck-timing
+  interval: 10s
+  timeout: 5s
+  retries: 30
+  start_period: 40s
+
+x-config-client-env: &config-client-env
+  # Utilise par spring.config.import=configserver:${CONFIG_SERVER_URL:http://localhost:8888}
+  CONFIG_SERVER_URL: http://config-service:8888
+  EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka/
+
+x-after-config: &after-config
+  discovery-service:
+    condition: service_healthy
+  config-service:
+    condition: service_healthy
+
+services:
+  # Base vectorielle du RAG (PostgreSQL + pgvector). Port hote 5433, port interne 5432.
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: ebank-postgres
+    environment:
+      POSTGRES_DB: ebank_rag
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${PGVECTOR_PASSWORD:?Definir la variable PGVECTOR_PASSWORD}
+    ports:
+      - "5433:5432"
+    volumes:
+      - ebank-rag-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ebank_rag"]
+      <<: *healthcheck-timing
+      start_period: 10s
+    networks:
+      - ebank-network
+
+  discovery-service:
+    build: ./discovery-service
+    container_name: discovery-service
+    environment:
+      EUREKA_INSTANCE_HOSTNAME: discovery-service
+    ports:
+      - "8761:8761"
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:8761/eureka/apps"]
+      <<: *healthcheck-timing
+    restart: on-failure
+    networks:
+      - ebank-network
+
+  config-service:
+    build: ./config-service
+    container_name: config-service
+    environment:
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-service:8761/eureka/
+      EUREKA_INSTANCE_HOSTNAME: config-service
+    ports:
+      - "8888:8888"
+    depends_on:
+      discovery-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:8888/gateway-service/default"]
+      <<: *healthcheck-timing
+    restart: on-failure
+    networks:
+      - ebank-network
+
+  customer-service:
+    build: ./customer-service
+    container_name: customer-service
+    environment:
+      <<: *config-client-env
+    ports:
+      - "8066:8066"
+    depends_on:
+      <<: *after-config
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:8066/customers"]
+      <<: *healthcheck-timing
+    restart: on-failure
+    networks:
+      - ebank-network
+
+  ebank-service:
+    build: ./ebank-service
+    container_name: ebank-service
+    environment:
+      <<: *config-client-env
+    ports:
+      - "8077:8077"
+    depends_on:
+      <<: *after-config
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "-o", "/dev/null", "http://localhost:8077/bankAccounts"]
+      <<: *healthcheck-timing
+    restart: on-failure
+    networks:
+      - ebank-network
+
+  # Serveur MCP RH (endpoint Streamable HTTP /mcp) : toute reponse HTTP suffit au healthcheck.
+  mcp-server:
+    build: ./mcp-server
+    container_name: mcp-server
+    environment:
+      <<: *config-client-env
+    ports:
+      - "8989:8989"
+    depends_on:
+      <<: *after-config
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8989/mcp"]
+      <<: *healthcheck-timing
+    restart: on-failure
+    networks:
+      - ebank-network
+
+  gateway-service:
+    build: ./gateway-service
+    container_name: gateway-service
+    environment:
+      <<: *config-client-env
+    ports:
+      - "8080:8080"
+    depends_on:
+      <<: *after-config
+    # Sain seulement quand la route /chatbot/** est reellement resolue par Eureka / LoadBalancer
+    # (reponse du chatbot, meme 404 sur "/"), et non 503 tant que l'instance n'est pas connue.
+    healthcheck:
+      test: ["CMD-SHELL", "code=$$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/chatbot/); [ \"$$code\" != 000 ] && [ \"$$code\" != 502 ] && [ \"$$code\" != 503 ] && [ \"$$code\" != 504 ]"]
+      <<: *healthcheck-timing
+    restart: on-failure
+    networks:
+      - ebank-network
+
+  ebank-chatbot-service:
+    build: .
+    container_name: ebank-chatbot-service
+    environment:
+      <<: *config-client-env
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ebank_rag
+      SPRING_AI_MCP_CLIENT_STREAMABLEHTTP_CONNECTIONS_MCPRH_URL: http://mcp-server:8989/mcp
+      SPRING_AI_MCP_CLIENT_STREAMABLEHTTP_CONNECTIONS_EBANK_URL: http://ebank-service:8077/mcp
+      SPRING_AI_MCP_CLIENT_STREAMABLEHTTP_CONNECTIONS_CUSTOMER_URL: http://customer-service:8066/mcp
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Definir la variable OPENAI_API_KEY}
+      PGVECTOR_PASSWORD: ${PGVECTOR_PASSWORD:?Definir la variable PGVECTOR_PASSWORD}
+      # Optionnel : sans token, le chatbot demarre sans Telegram.
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+    ports:
+      - "8098:8098"
+    depends_on:
+      <<: *after-config
+      postgres:
+        condition: service_healthy
+      customer-service:
+        condition: service_healthy
+      ebank-service:
+        condition: service_healthy
+      mcp-server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-s", "-o", "/dev/null", "http://localhost:8098/"]
+      <<: *healthcheck-timing
+      # Premier demarrage sur une base vide : ingestion RAG (embeddings, descriptions d'images, transcription).
+      start_period: 300s
+    restart: on-failure
+    networks:
+      - ebank-network
+
+  # Nginx sert Angular et relaie /chatbot/** vers gateway-service:8080 (meme origine pour le navigateur).
+  frontend:
+    build: ./frontend
+    container_name: ebank-frontend
+    ports:
+      - "4200:80"
+    depends_on:
+      gateway-service:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      <<: *healthcheck-timing
+      start_period: 5s
+    networks:
+      - ebank-network
+
+networks:
+  ebank-network:
+    name: ebank-network
+
+volumes:
+  ebank-rag-pgdata:

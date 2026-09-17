@@ -1,0 +1,5 @@
+# Contexte de build du chatbot (racine) : uniquement le projet Maven du chatbot.
+*
+!pom.xml
+!src/
+src/test/
