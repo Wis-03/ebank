@@ -34,3 +34,12 @@ build/
 
 ### Secrets Docker Compose ###
 .env
+
+### Donnees locales et fichiers generes ###
+.env.*
+!.env.example
+logs/
+*.log
+node_modules/
+.angular/
+dist/
