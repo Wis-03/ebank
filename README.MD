@@ -40,6 +40,8 @@ Open the Angular interface at `http://localhost:4200`; the API Gateway is at `ht
 - **PostgreSQL + pgvector:** store document chunks, embeddings, and source metadata together for retrieval with citations.
 - **Docker Compose:** start the local multi-service stack with health checks and ordered dependencies.
 
+**Validation scope:** the current automated tests are Spring Boot context-load smoke tests. The documented nine-container health check and sample interactions are manual integration checks; no performance benchmark is claimed.
+
 The detailed technical documentation below is in French.
 
 ---
