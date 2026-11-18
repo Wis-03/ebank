@@ -1,4 +1,25 @@
-# EBank — Spring Cloud & Agentic AI
+# EBank — Agentic AI Banking Platform
+
+> **Engineering snapshot:** A Java 21 / Spring Cloud microservices application enhanced with a tool-using AI banking assistant. It combines **MCP tools** for service queries with **multimodal RAG** on PostgreSQL + pgvector, exposing chat through **Angular** and **Telegram**.
+
+### Project highlights
+
+| Area | Implementation |
+| --- | --- |
+| Architecture | Spring Cloud microservices, Eureka, Config Server, API Gateway, OpenFeign |
+| Agentic AI | Spring AI, GPT-4o, bounded ReAct workflow, conversation memory |
+| Business tools | MCP Streamable HTTP clients and servers for accounts, customers, and employees |
+| Retrieval | Document ingestion, embeddings, semantic search, PostgreSQL + pgvector |
+| Multimodal | PDF, image, and audio workflows |
+| Delivery | Docker Compose, Java 21, Angular |
+
+**Engineering focus:** Integrating an AI assistant into existing business services, grounding responses in retrieved context, and documenting service interactions end to end.
+
+**Explore:** [Architecture](#2-architecture-globale) · [Agentic AI](#5-agentic-ai) · [RAG](#7-rag) · [Run locally](#12-installation-et-lancement) · [Demo](#13-démo)
+
+The detailed technical documentation below is in French.
+
+---
 
 ## 1. Présentation
 
