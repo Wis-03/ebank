@@ -15,7 +15,30 @@
 
 **Engineering focus:** Integrating an AI assistant into existing business services, grounding responses in retrieved context, and documenting service interactions end to end.
 
-**Explore:** [Architecture](#2-architecture-globale) · [Agentic AI](#5-agentic-ai) · [RAG](#7-rag) · [Run locally](#12-installation-et-lancement) · [Demo](#13-démo)
+**Explore:** [Architecture](#2-architecture-globale) · [Agentic AI](#5-agentic-ai) · [RAG](#7-rag) · [Run locally](#12-installation-et-lancement) · [Demo](#13-demo-and-validation-redacted)
+
+## English quick start
+
+**Prerequisites:** Docker with Docker Compose and an OpenAI API key. A Telegram bot token is optional.
+
+```bash
+git clone https://github.com/Wis-03/ebank.git
+cd ebank
+cp .env.example .env
+# Set OPENAI_API_KEY and PGVECTOR_PASSWORD in the local .env file.
+# TELEGRAM_BOT_TOKEN is optional.
+docker compose up -d --build
+docker compose ps
+```
+
+Open the Angular interface at `http://localhost:4200`; the API Gateway is at `http://localhost:8080`, and Eureka at `http://localhost:8761`. Keep credentials in the local `.env` file, which is ignored by Git. Run `docker compose down` to stop the stack; the documented pgvector volume is retained.
+
+### Key engineering decisions
+
+- **Spring AI and bounded ReAct:** keep the assistant in the Java stack and cap the reasoning/tool cycle at five iterations.
+- **MCP Streamable HTTP:** let the assistant discover and invoke business capabilities exposed by separate services.
+- **PostgreSQL + pgvector:** store document chunks, embeddings, and source metadata together for retrieval with citations.
+- **Docker Compose:** start the local multi-service stack with health checks and ordered dependencies.
 
 The detailed technical documentation below is in French.
 
@@ -244,185 +267,20 @@ docker compose ps           # tous les conteneurs doivent être "healthy"
 
 Arrêt : `docker compose down` (les données pgvector sont conservées).
 
-## 13. Démo
+## 13. Demo and validation (redacted)
 
-Commandes exécutées sur la stack Docker démarrée (`docker compose ps` : 9 conteneurs `healthy`). Les réponses sont
-reproduites telles quelles ; `...` signale une sortie tronquée. Les identifiants de comptes et les soldes sont générés
-aléatoirement au démarrage d'Ebank.
+The repository documents a local manual demo in which nine Docker Compose containers reported healthy. The recorded integration checks cover service registration in Eureka, API Gateway routing, MCP tool calls, document retrieval, and image, audio, and PDF inputs.
 
-### Discovery (Eureka)
+To protect privacy, the public documentation omits sample account identifiers, balances, customer and employee names, email addresses, and salary values. No performance benchmark is claimed.
 
-Tableau de bord Eureka : tous les services enregistrés et `UP`.
+## 14. Example use cases
 
-<img src="screens/eureka.png" alt="Tableau de bord Eureka">
+- Look up an account through the service API and retrieve the associated customer through OpenFeign.
+- Ask a question grounded in the indexed bank documents and inspect the cited source.
+- Submit a PDF, image, or audio file through the chatbot endpoints and review the extracted or transcribed context.
 
-**discovery-service** — `GET /actuator/health`, puis la liste des applications enregistrées
+Use generated local data when reproducing these flows; do not add real customer, employee, or financial records to the repository.
 
-```console
-$ curl -s http://localhost:8761/actuator/health
-{"status":"UP"}
+## 15. Project evolution
 
-$ curl -s -H "Accept: application/json" http://localhost:8761/eureka/apps
-CUSTOMER-SERVICE UP
-EBANK-SERVICE UP
-GATEWAY-SERVICE UP
-MCP-SERVER UP
-EBANK-CHATBOT-SERVICE UP
-CONFIG-SERVICE UP
-```
-
-> Sortie JSON résumée ici en `APPLICATION STATUS`.
-
-### Chaque microservice
-
-**config-service** — `GET /{application}/{profile}` : configuration servie à un client
-
-```console
-$ curl -s http://localhost:8888/customer-service/default
-{"name":"customer-service","profiles":["default"],"label":null,"version":null,"state":null,"propertySources":[{"name":"classpath:/config-repo/customer-service.properties","source":{"server.port":"8066","spring.ai.mcp.server.protocol":"streamable","spring.ai.mcp.server.name":"customer-mcp-server"}},{"name":"classpath:/config-repo/application.properties","source":{"eureka.client.service-url.defaultZone":"http://localhost:8761/eureka/","eureka.instance.prefer-ip-address":"true"}}]}
-```
-
-**customer-service** — `GET /customers` et `GET /customers/{id}`
-
-```console
-$ curl -s http://localhost:8066/customers
-[{"id":"C1","name":"Yassine","email":"yassine@gmail.com"},{"id":"C2","name":"Imane","email":"imane@gmail.com"},{"id":"C3","name":"Mohamed","email":"mohamed@gmail.com"}]
-
-$ curl -s http://localhost:8066/customers/C1
-{"id":"C1","name":"Yassine","email":"yassine@gmail.com"}
-```
-
-**ebank-service** — `GET /bankAccounts`, puis `GET /bankAccounts/{id}` enrichi par OpenFeign avec le client propriétaire
-
-```console
-$ curl -s http://localhost:8077/bankAccounts
-[{"id":"9d51bdb7-019d-4f77-9c27-3c318fb1cac2","balance":5737995.478328073,"createdAt":"2026-09-18T21:24:09.008+00:00","type":"SAVING-ACCOUNT","customerId":"C1"},{"id":"082a8e9f-61bb-46fe-a1a3-7e54562edcf9","balance":4329623.853533243,"createdAt":"2026-09-18T21:24:09.722+00:00","type":"CURRENT-ACCOUNT","customerId":"C2"}, ...]
-
-$ curl -s http://localhost:8077/bankAccounts/9d51bdb7-019d-4f77-9c27-3c318fb1cac2
-{"bankAccount":{"id":"9d51bdb7-019d-4f77-9c27-3c318fb1cac2","balance":5737995.478328073,"createdAt":"2026-09-18T21:24:09.008+00:00","type":"SAVING-ACCOUNT","customerId":"C1"},"customer":{"id":"C1","name":"Yassine","email":"yassine@gmail.com"}}
-```
-
-**mcp-server** — handshake MCP Streamable HTTP (`initialize`), puis appel d'outil (`tools/call`) avec l'en-tête de session
-
-```console
-$ curl -s -i -X POST http://localhost:8989/mcp \
-    -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
-    -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0"}}}'
-HTTP/1.1 200
-Mcp-Session-Id: 50ffb2a7-63a1-4e80-8e07-f15fdc798a9d
-Content-Type: application/json
-
-{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":"2025-06-18","capabilities":{"completions":{},"logging":{},"prompts":{"listChanged":true},"resources":{"subscribe":false,"listChanged":true},"tools":{"listChanged":true}},"serverInfo":{"name":"mcp-rh","version":"1.0.0"}}}
-
-$ curl -s -X POST http://localhost:8989/mcp \
-    -H "Content-Type: application/json" -H "Accept: application/json, text/event-stream" \
-    -H "Mcp-Session-Id: 50ffb2a7-63a1-4e80-8e07-f15fdc798a9d" \
-    -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"getAllEmployees","arguments":{}}}'
-event:message
-data:{"jsonrpc":"2.0","id":2,"result":{"content":[{"type":"text","text":"[{\"name\":\"Hassan\",\"salary\":12300.0,\"seniority\":4},{\"name\":\"Mohamed\",\"salary\":34000.0,\"seniority\":1},{\"name\":\"Imane\",\"salary\":23000.0,\"seniority\":10}]"}],"isError":false}}
-```
-
-> Sans `initialize` préalable, un `tools/call` échoue faute de `Mcp-Session-Id` : c'est le comportement normal du
-> protocole Streamable HTTP. Entre les deux appels, le client envoie aussi la notification `notifications/initialized`.
-
-**gateway-service** — mêmes requêtes routées par la Gateway (`lb://NOM-EUREKA`) au lieu d'appeler le service directement
-
-```console
-$ curl -s http://localhost:8080/customers
-[{"id":"C1","name":"Yassine","email":"yassine@gmail.com"},{"id":"C2","name":"Imane","email":"imane@gmail.com"},{"id":"C3","name":"Mohamed","email":"mohamed@gmail.com"}]
-
-$ curl -s http://localhost:8080/ebank/bankAccounts/9d51bdb7-019d-4f77-9c27-3c318fb1cac2
-{"bankAccount":{"id":"9d51bdb7-019d-4f77-9c27-3c318fb1cac2","balance":5737995.478328073,"createdAt":"2026-09-18T21:24:09.008+00:00","type":"SAVING-ACCOUNT","customerId":"C1"},"customer":{"id":"C1","name":"Yassine","email":"yassine@gmail.com"}}
-```
-
-**ebank-chatbot-service** — via la Gateway, de bout en bout
-
-Chaîne d'outils MCP (`getBankAccountById` → `getCustomerById`) :
-
-```console
-$ curl -s "http://localhost:8080/chatbot/chat?query=Qui%20est%20le%20propri%C3%A9taire%20du%20compte%209d51bdb7-019d-4f77-9c27-3c318fb1cac2%20%3F"
-Le propriétaire du compte 9d51bdb7-019d-4f77-9c27-3c318fb1cac2 est Yassine. Son adresse e-mail est yassine@gmail.com.
-```
-
-Serveur MCP RH (`getAllEmployees`) :
-
-```console
-$ curl -s "http://localhost:8080/chatbot/chat?query=Liste%20les%20employ%C3%A9s"
-Voici la liste des employés :
-
-- Hassan
-- Mohamed
-- Imane
-```
-
-RAG (`searchBankDocuments`, source citée) :
-
-```console
-$ curl -s "http://localhost:8080/chatbot/chat?query=Quelles%20sont%20les%20conditions%20du%20compte%20%C3%A9pargne%20%3F"
-Les conditions du compte épargne (SAVING-ACCOUNT) sont les suivantes d'après le document fourni :
-
-1. **Rémunération**
-   - Taux de rémunération : 2,35 % par an.
-   - Les intérêts sont calculés par quinzaine et versés le 31 décembre.
-...
-Ces informations sont issues du fichier conditions-compte-epargne.pdf.
-```
-
-Audio (transcription Whisper puis RAG), image et PDF :
-
-```console
-$ curl -s -F "file=@demo/question-samedi.wav;type=audio/wav" http://localhost:8080/chatbot/chat/audio
-{"answer":"Les agences ferment le samedi à 13:00. D'après l'image fournie : affiche-horaires-agences.png.","transcription":"A quelle heure ferment les agences le samedi ?\n"}
-
-$ curl -s -F "file=@src/main/resources/rag/images/avantages-carte-gold.png;type=image/png" \
-       -F "query=Quels sont les avantages de la carte ?" http://localhost:8080/chatbot/chat/image
-{"answer":"D'après l'image fournie, les avantages de la Carte Gold Ebank sont :\n\n- **Assurance voyage** : 50 000 DH\n- **Salon d'aéroport** : 2 fois par an\n- **Cashback** : 1 % à l'étranger","transcription":null}
-
-$ curl -s -F "file=@src/main/resources/rag/docs/grille-tarifaire.pdf;type=application/pdf" \
-       -F "query=Quels sont les frais de la carte bancaire ?" http://localhost:8080/chatbot/chat/pdf
-{"answer":"D'après le document fourni, les frais de la carte bancaire sont les suivants :\n\n- **Carte Classic** : cotisation de 120 DH par an.\n- **Carte Gold** : cotisation de 450 DH par an.\n- **Remplacement d'une carte** : 90 DH.\n- **Retrait au distributeur d'une autre banque** : 6 DH par retrait.","transcription":null}
-```
-
-> `demo/question-samedi.wav` est un message vocal de test : « À quelle heure ferment les agences le samedi ? ».
-
-### Interface Angular
-
-| Question texte → outils MCP | Question texte → RAG |
-|---|---|
-| <img src="screens/front-texte-mcp.png" alt="Chat texte avec appel MCP"> | <img src="screens/front-texte-rag.png" alt="Chat texte avec RAG"> |
-
-| Image envoyée | PDF envoyé |
-|---|---|
-| <img src="screens/front-image.png" alt="Image envoyée au chatbot"> | <img src="screens/front-pdf.png" alt="PDF envoyé au chatbot"> |
-
-**Message audio** : le fichier est transcrit par Whisper, la transcription s'affiche sous le lecteur, puis l'agent répond
-à partir de la base documentaire.
-
-<img src="screens/front-audio.png" alt="Message audio envoyé au chatbot">
-
-## 14. Exemples d'utilisation
-
-Les identifiants de comptes sont générés au démarrage d'Ebank : `GET http://localhost:8080/ebank/bankAccounts` les liste.
-
-| Cas | Exemple | Traitement |
-|---|---|---|
-| Question simple | « Bonjour » | Réponse directe, sans outil |
-| Recherche d'un compte | « Donne-moi les informations du compte `<id>` » | `getBankAccountById` |
-| Propriétaire d'un compte | « Qui est le propriétaire du compte `<id>` ? » | `getBankAccountById` → `getCustomerById` |
-| Question RAG | « Quelles sont les conditions du compte épargne ? » | `searchBankDocuments`, source citée |
-| Image | Photo d'un ticket + « Quel est le montant total ? » | Lecture de l'image par GPT-4o |
-| Audio | Message vocal « À quelle heure ferment les agences le samedi ? » | Whisper puis `searchBankDocuments` |
-| PDF | Relevé PDF + « Quel est le solde final du relevé fourni ? » | Réponse d'après le document fourni |
-
-```bash
-curl "http://localhost:8080/chatbot/chat?query=Bonjour"
-curl -F "file=@releve.pdf;type=application/pdf" -F "query=Quel est le solde final du relevé fourni ?" \
-     http://localhost:8080/chatbot/chat/pdf
-curl -F "file=@question.wav;type=audio/wav" http://localhost:8080/chatbot/chat/audio
-```
-
-## 15. Évolution du projet
-
-Le projet a été initialement fourni sous forme d'une base Spring Boot intégrant un chatbot, Spring AI, Telegram, Ebank et
-MCP. Cette base a ensuite été étendue et structurée en architecture microservices Spring Cloud, puis enrichie avec Customer
-Service, OpenFeign, Agentic AI/ReAct, RAG, traitement multimodal, interface Angular et Docker.
+The initial Spring Boot application was extended into a Spring Cloud microservices architecture, then enriched with customer-service integration, OpenFeign, a bounded ReAct assistant, MCP tools, multimodal RAG, a Telegram interface, an Angular chat client, and Docker Compose orchestration.
